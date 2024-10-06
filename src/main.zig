@@ -23,6 +23,10 @@ pub fn main() !void {
 
     var tokenizer = Tokenizer.init(source_code);
     while (tokenizer.next()) |token| {
-        std.debug.print("{any}\n", .{token});
+        std.debug.print("{any}: {s}\n", .{ token, source_code[token.start..token.end] });
     }
+}
+
+test {
+    _ = Tokenizer;
 }

@@ -129,7 +129,6 @@ pub fn next(self: *Tokenizer) ?Token {
             self.index += 1;
             switch (self.src[self.index]) {
                 '0'...'9' => {
-                    self.index += 1;
                     continue :state .int_literal;
                 },
                 else => {},
@@ -139,4 +138,19 @@ pub fn next(self: *Tokenizer) ?Token {
 
     result.end = self.index;
     return result;
+}
+
+test next {
+    const global = struct {
+        fn testOne(input: []const u8) anyerror!void {
+            const inputZ = try std.testing.allocator.dupeZ(u8, input);
+            defer std.testing.allocator.free(inputZ);
+
+            var tokenizer = Tokenizer.init(inputZ);
+            while (tokenizer.next()) |token| {
+                _ = token;
+            }
+        }
+    };
+    try std.testing.fuzz(global.testOne, .{});
 }

@@ -1,1 +1,1 @@
-height = (width+56) * factor(foo);
+height = (width+513) * factor(foo);
