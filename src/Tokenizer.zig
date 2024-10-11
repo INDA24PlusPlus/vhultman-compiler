@@ -6,17 +6,6 @@ pub const Token = struct {
     start: u32,
     end: u32,
 
-    pub fn computeLineNumber(self: Token, src: []const u8) usize {
-        var idx: usize = 0;
-        var line_number: usize = 0;
-        while (idx < self.start) : (line_number += 1) {
-            const next_new_line = std.mem.indexOfScalar(u8, src[idx..], '\n') orelse @panic("???");
-            idx += next_new_line;
-        }
-
-        return line_number;
-    }
-
     const keywords = std.StaticStringMap(Type).initComptime(.{
         .{ "if", .@"if" },
         .{ "else", .@"else" },
