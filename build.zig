@@ -5,11 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const exe = b.addExecutable(.{
-        .name = "vhultman-compiler",
+        .name = "compile",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
+
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

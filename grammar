@@ -1,0 +1,37 @@
+<program> ::= <statement>+
+<statement> ::= (<expr_statement>   |
+				 <var_statement>    |
+                 <assign_statement> |
+                 <return_statement> |
+                 <block_statement>  |
+                 <if_statement>     |
+                 <while_loop>
+                 )
+                 <s>?
+
+<while_loop> ::= "while" <s>? <condition> <s>? <block_statement>
+<if_statement> ::= "if" <s>? <condition> <s>? <block_statement> (<s>? "else" <s>? <block_statement>)?
+<block_statement> ::= "{" <s>? (<statement> <s>?)* <s>? "}"
+<return_statement> ::= "return" <s>? <expr> <s>? ";"
+<assign_statement> ::= <identifier> <s>? "=" <s>? <expr> <s>? ";"
+<var_statement> ::= "var" <s>? <identifier> <s>? "=" <s>? <expr> <s>? ";"
+<expr_statement> ::= <expr> <s>? ";"
+
+<condition> ::= "(" <s>? <expr> <s>? ")"
+
+/* Got lazy so this is now ambigious */
+<expr> ::= <expr> <s>? "+" <s>? <term>  |
+           <expr> <s>? "-" <term> <s>?  |
+           <term>                       |
+           <expr> <s>? "==" <s>? <expr> |
+           <expr> <s>? "!=" <s>? <expr> |
+           <expr> <s>? "<" <s>? <expr>  |
+           <expr> <s>? ">" <s>? <expr> 
+
+
+<term> ::= <term> <s>? "*" <s>? <factor> | <term> <s>? "/" <s>? <factor> | <factor>
+<factor> ::= "(" <s>? <expr> <s>? ")" | "-" <s>? <factor> | "!" <s>? <factor> | <integer> | <identifier>
+<identifier> ::= [A-z] ([A-z] | [0-9])*
+<integer> ::= <digit> | <digit> <integer>
+<digit> ::= [0-9]
+<s> ::= (" " | "\n" | "\t")+

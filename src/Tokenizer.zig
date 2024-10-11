@@ -1,31 +1,60 @@
 const std = @import("std");
 const Tokenizer = @This();
 
-const TokenType = enum(u8) {
-    @"+",
-    @"-",
-    @"*",
-    @"/",
-    @"if",
-    @"else",
-    @"=",
-    @";",
-    @"(",
-    @")",
-    int_literal,
-    invalid,
-    identifier,
-};
-
-const Token = struct {
-    type: TokenType,
+pub const Token = struct {
+    type: Type,
     start: u32,
     end: u32,
 
-    const keywords = std.StaticStringMap(TokenType).initComptime(.{
+    pub fn computeLineNumber(self: Token, src: []const u8) usize {
+        var idx: usize = 0;
+        var line_number: usize = 0;
+        while (idx < self.start) : (line_number += 1) {
+            const next_new_line = std.mem.indexOfScalar(u8, src[idx..], '\n') orelse @panic("???");
+            idx += next_new_line;
+        }
+
+        return line_number;
+    }
+
+    const keywords = std.StaticStringMap(Type).initComptime(.{
         .{ "if", .@"if" },
         .{ "else", .@"else" },
+        .{ "var", .var_stmt },
+        .{ "return", .@"return" },
+        .{ "true", .true },
+        .{ "false", .false },
+        .{ "while", .@"while" },
     });
+
+    pub const Type = enum(u8) {
+        @"+",
+        @"-",
+        @"*",
+        @"/",
+        @"!",
+        @"!=",
+        @"==",
+        @"<",
+        @">",
+        @"if",
+        @"else",
+        assign,
+        @";",
+        @"(",
+        @")",
+        @"{",
+        @"}",
+        var_stmt,
+        @"return",
+        @"while",
+        true,
+        false,
+        int_literal,
+        invalid,
+        identifier,
+        eof,
+    };
 };
 
 // Only having one enum value in this will crash the compiler ¯\_(ツ)_/¯
@@ -42,12 +71,17 @@ pub fn init(src: [:0]const u8) Tokenizer {
     return .{ .src = src, .index = 0 };
 }
 
-pub fn next(self: *Tokenizer) ?Token {
+pub fn next(self: *Tokenizer) Token {
     var result: Token = .{
         .type = undefined,
         .start = self.index,
         .end = undefined,
     };
+
+    if (self.index >= self.src.len) {
+        result.type = .eof;
+        return result;
+    }
 
     state: switch (State.start) {
         .start => switch (self.src[self.index]) {
@@ -73,9 +107,32 @@ pub fn next(self: *Tokenizer) ?Token {
                 self.index += 1;
                 result.type = .@"/";
             },
+            '!' => {
+                self.index += 1;
+                if (self.src[self.index] == '=') {
+                    self.index += 1;
+                    result.type = .@"!=";
+                } else {
+                    result.type = .@"!";
+                }
+            },
             '=' => {
                 self.index += 1;
-                result.type = .@"=";
+                if (self.src[self.index] == '=') {
+                    self.index += 1;
+                    result.type = .@"==";
+                } else {
+                    result.type = .assign;
+                }
+            },
+
+            '<' => {
+                self.index += 1;
+                result.type = .@"<";
+            },
+            '>' => {
+                self.index += 1;
+                result.type = .@">";
             },
             ';' => {
                 self.index += 1;
@@ -89,6 +146,14 @@ pub fn next(self: *Tokenizer) ?Token {
                 self.index += 1;
                 result.type = .@")";
             },
+            '{' => {
+                self.index += 1;
+                result.type = .@"{";
+            },
+            '}' => {
+                self.index += 1;
+                result.type = .@"}";
+            },
             'a'...'z', 'A'...'Z', '_' => {
                 result.type = .identifier;
                 continue :state .identifier;
@@ -98,11 +163,12 @@ pub fn next(self: *Tokenizer) ?Token {
                 continue :state .int_literal;
             },
             0 => {
-                if (self.index == self.src.len) {
-                    return null;
+                if (self.index >= self.src.len) {
+                    result.type = .eof;
+                } else {
+                    result.type = .invalid;
                 }
 
-                result.type = .invalid;
                 self.index += 1;
             },
             else => {
