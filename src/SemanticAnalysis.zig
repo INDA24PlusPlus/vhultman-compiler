@@ -4,7 +4,7 @@ const SemanticAnalysis = @This();
 const Allocator = std.mem.Allocator;
 const Token = @import("Tokenizer.zig").Token;
 
-const Type = enum { int, bool };
+const Type = enum { int, bool, undeclared };
 
 const Symbol = struct {
     token_index: u32,
@@ -79,6 +79,121 @@ pub fn deinit(self: *SemanticAnalysis) void {
     self.errors.deinit(self.gpa);
 }
 
+pub fn typeCheckExpression(self: *SemanticAnalysis, node: *const Ast.Node) !Type {
+    // TODO: AstNode
+    switch (node.type) {
+        // Int only operations.
+        .add,
+        .sub,
+        .mul,
+        .div,
+        => {
+            const lhs_node = self.ast.nodes.get(node.lhs);
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const lhs = try self.typeCheckExpression(&lhs_node);
+            const rhs = try self.typeCheckExpression(&rhs_node);
+
+            if (lhs != .int) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .int,
+                    .got = lhs,
+                    .token = lhs_node.token_index,
+                } });
+            }
+
+            if (rhs != .int) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .int,
+                    .got = rhs,
+                    .token = rhs_node.token_index,
+                } });
+            }
+
+            return .int;
+        },
+        // Not ideal code duplication but whatever.
+        .greater_than, .less_than => {
+            const lhs_node = self.ast.nodes.get(node.lhs);
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const lhs = try self.typeCheckExpression(&lhs_node);
+            const rhs = try self.typeCheckExpression(&rhs_node);
+
+            if (lhs != .int) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .int,
+                    .got = lhs,
+                    .token = lhs_node.token_index,
+                } });
+            }
+
+            if (rhs != .int) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .int,
+                    .got = rhs,
+                    .token = rhs_node.token_index,
+                } });
+            }
+
+            return .bool;
+        },
+        .equal, .not_equal => {
+            const lhs_node = self.ast.nodes.get(node.lhs);
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const lhs = try self.typeCheckExpression(&lhs_node);
+            const rhs = try self.typeCheckExpression(&rhs_node);
+
+            if (rhs != lhs) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = lhs,
+                    .got = rhs,
+                    .token = rhs_node.token_index,
+                } });
+            }
+
+            return lhs;
+        },
+        .not => {
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const rhs_type = try self.typeCheckExpression(&rhs_node);
+
+            if (rhs_type != .bool) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .bool,
+                    .got = rhs_type,
+                    .token = rhs_node.token_index,
+                } });
+            }
+
+            return .bool;
+        },
+        .negate => {
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const rhs_type = try self.typeCheckExpression(&rhs_node);
+
+            if (rhs_type != .int) {
+                try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                    .expected = .int,
+                    .got = rhs_type,
+                    .token = rhs_node.token_index,
+                } });
+            }
+
+            return .int;
+        },
+
+        .int_literal => return .int,
+        .bool_literal => return .bool,
+        .identifier => {
+            if (self.sym_table.get(self.getIdentBytes(node.token_index))) |*sym| {
+                return sym.type;
+            }
+
+            return .undeclared;
+        },
+        else => unreachable,
+    }
+}
+
 pub fn resolveProgram(self: *SemanticAnalysis) !void {
     // Node 0 is always root node.
     const root_node = self.ast.nodes.get(0);
@@ -111,6 +226,15 @@ fn resolveIfElseStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void 
     const else_block = self.ast.nodes.get(self.ast.extra[node.rhs + 1]);
 
     try self.resolveExpression(&condition_expr);
+    const t = try self.typeCheckExpression(&condition_expr);
+    if (t != .bool) {
+        try self.errors.append(self.gpa, .{ .mismatched_types = .{
+            .expected = .bool,
+            .got = t,
+            .token = condition_expr.token_index,
+        } });
+    }
+
     try self.resolveBlock(&block);
     try self.resolveBlock(&else_block);
 }
@@ -120,6 +244,15 @@ fn resolveIfStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
     const block = self.ast.nodes.get(node.rhs);
 
     try self.resolveExpression(&condition_expr);
+    const t = try self.typeCheckExpression(&condition_expr);
+    if (t != .bool) {
+        try self.errors.append(self.gpa, .{ .mismatched_types = .{
+            .expected = .bool,
+            .got = t,
+            .token = condition_expr.token_index,
+        } });
+    }
+
     try self.resolveBlock(&block);
 }
 
@@ -137,15 +270,24 @@ fn resolveAssignStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void 
     const ident_node = self.ast.nodes.get(node.lhs);
     const ident_bytes = self.getIdentBytes(ident_node.token_index);
 
-    if (self.sym_table.get(ident_bytes) == null) {
+    if (self.sym_table.get(ident_bytes)) |*sym| {
+        const expr_node = self.ast.nodes.get(node.rhs);
+
+        try self.resolveExpression(&expr_node);
+        const t = try self.typeCheckExpression(&expr_node);
+        if (t != sym.type) {
+            try self.errors.append(self.gpa, .{ .mismatched_types = .{
+                .expected = sym.type,
+                .got = t,
+                .token = expr_node.token_index,
+            } });
+        }
+    } else {
         try self.errors.append(
             self.gpa,
             .{ .use_of_undeclared = .{ .identifier_token = ident_node.token_index } },
         );
     }
-
-    const expr_node = self.ast.nodes.get(node.rhs);
-    try self.resolveExpression(&expr_node);
 }
 
 fn resolveVarStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
@@ -158,15 +300,10 @@ fn resolveVarStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
             .redecl = ident_node.token_index,
         } });
     } else {
-        const sym: Symbol = .{
-            .token_index = ident_node.token_index,
-            .type = .int,
-        };
-
-        try self.sym_table.put(self.gpa, sym, ident_bytes);
-
         const expr_node = self.ast.nodes.get(node.rhs);
+        const t = try self.typeCheckExpression(&expr_node);
         try self.resolveExpression(&expr_node);
+        try self.sym_table.put(self.gpa, .{ .token_index = ident_node.token_index, .type = t }, ident_bytes);
     }
 }
 
@@ -213,18 +350,32 @@ const SemaError = union(enum) {
     use_of_undeclared: struct {
         identifier_token: u32,
     },
+    mismatched_types: struct {
+        expected: Type,
+        got: Type,
+        token: u32,
+    },
 
     pub fn print(self: SemaError, writer: anytype, src: []const u8, tokens: []const Token) !void {
         switch (self) {
             .redecl => |info| {
                 const ident_token = tokens[info.redecl];
-                try writer.print("Error: Redecleration of \"{s}\"\n", .{
+                try writer.print("error: Redecleration of \"{s}\"\n", .{
                     src[ident_token.start..ident_token.end],
                 });
             },
             .use_of_undeclared => |info| {
                 const ident_token = tokens[info.identifier_token];
-                try writer.print("Error: Use of undeclared identifier \"{s}\"\n", .{
+                try writer.print("error: Use of undeclared identifier \"{s}\"\n", .{
+                    src[ident_token.start..ident_token.end],
+                });
+            },
+
+            .mismatched_types => |info| {
+                const ident_token = tokens[info.token];
+                try writer.print("error: mismatched types. Expected type {s} but got {s} at token \"{s}\"\n", .{
+                    @tagName(info.expected),
+                    @tagName(info.got),
                     src[ident_token.start..ident_token.end],
                 });
             },

@@ -1,0 +1,9 @@
+var a = 10;
+var b = a + 10;
+b = !foo;
+
+if (b < 100) {
+    b = b + 10;
+} else {
+    var c = 10;
+}
