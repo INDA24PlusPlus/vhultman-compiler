@@ -165,8 +165,8 @@ fn parseAssignmentStatement(self: *Parser) !u32 {
         .token_index = self.token_index,
     });
 
-    if (self.next_token.type == .@";") {
-        try self.advanceTokenStream();
+    if (!try self.expectNext(.@";")) {
+        return error.FailedToParse;
     }
 
     return @intCast(node_index);

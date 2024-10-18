@@ -1,0 +1,22 @@
+var b = 10;
+var a = b + 10;
+b = 15;
+
+{
+	b = 11;
+	var c = 10;
+}
+
+var c = 11;
+
+if (c < 6) {
+	c = 11;
+} else {
+	var d = 10;
+}
+
+var d = 10;
+
+while (d < a) {
+	var hfg = 10;
+}
