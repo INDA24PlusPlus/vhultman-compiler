@@ -56,14 +56,16 @@ const SymbolTable = struct {
     }
 };
 
-ast: *Ast,
+ast: *const Ast,
 sym_table: SymbolTable,
 tokens: []const Token,
 src: []const u8,
 gpa: Allocator,
 errors: std.ArrayListUnmanaged(SemaError),
 
-pub fn init(allocator: Allocator, tokens: []const Token, src: []const u8, ast: *Ast) !SemanticAnalysis {
+has_return: bool = false,
+
+pub fn init(allocator: Allocator, tokens: []const Token, src: []const u8, ast: *const Ast) !SemanticAnalysis {
     return .{
         .ast = ast,
         .sym_table = try SymbolTable.init(allocator),
@@ -180,8 +182,17 @@ pub fn typeCheckExpression(self: *SemanticAnalysis, node: *const Ast.Node) !Type
 
             return .int;
         },
+        .int_literal => {
+            const string_format = self.getIdentBytes(node.token_index);
+            _ = std.fmt.parseInt(i64, string_format, 10) catch |err| switch (err) {
+                error.Overflow => try self.errors.append(self.gpa, .{
+                    .int_to_big = node.token_index,
+                }),
+                else => unreachable,
+            };
 
-        .int_literal => return .int,
+            return .int;
+        },
         .bool_literal => return .bool,
         .identifier => {
             if (self.sym_table.get(self.getIdentBytes(node.token_index))) |*sym| {
@@ -198,9 +209,14 @@ pub fn resolveProgram(self: *SemanticAnalysis) !void {
     // Node 0 is always root node.
     const root_node = self.ast.nodes.get(0);
     const children = self.ast.extra[root_node.rhs .. root_node.rhs + root_node.lhs];
+
     for (children) |child| {
         const child_node = self.ast.nodes.get(child);
         try self.resolveStatement(&child_node);
+    }
+
+    if (!self.has_return) {
+        try self.errors.append(self.gpa, .{ .missing_return = {} });
     }
 
     if (self.errors.items.len != 0) {
@@ -216,8 +232,25 @@ pub fn resolveStatement(self: *SemanticAnalysis, node: *const Ast.Node) anyerror
         // While loop and if statement have the same semantics.
         .if_statement, .while_loop => try self.resolveIfStatement(node),
         .if_else_statement => try self.resolveIfElseStatement(node),
+        .return_statement => try self.resolveReturnStatement(node),
         else => unreachable,
     }
+}
+
+fn resolveReturnStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
+    const expr_node = self.ast.nodes.get(node.lhs);
+    try self.resolveExpression(&expr_node);
+
+    const expr_type = try self.typeCheckExpression(&expr_node);
+    if (expr_type != .int) {
+        try self.errors.append(self.gpa, .{ .mismatched_types = .{
+            .expected = .int,
+            .got = expr_type,
+            .token = expr_node.token_index,
+        } });
+    }
+
+    self.has_return = true;
 }
 
 fn resolveIfElseStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
@@ -355,6 +388,8 @@ const SemaError = union(enum) {
         got: Type,
         token: u32,
     },
+    missing_return: void,
+    int_to_big: u32,
 
     pub fn print(self: SemaError, writer: anytype, src: []const u8, tokens: []const Token) !void {
         switch (self) {
@@ -370,13 +405,21 @@ const SemaError = union(enum) {
                     src[ident_token.start..ident_token.end],
                 });
             },
-
             .mismatched_types => |info| {
                 const ident_token = tokens[info.token];
                 try writer.print("error: mismatched types. Expected type {s} but got {s} at token \"{s}\"\n", .{
                     @tagName(info.expected),
                     @tagName(info.got),
                     src[ident_token.start..ident_token.end],
+                });
+            },
+            .missing_return => {
+                try writer.print("error: File must contain return statement\n", .{});
+            },
+            .int_to_big => |token_index| {
+                const token = tokens[token_index];
+                try writer.print("error: Integer \"{s}\" larger than max size of signed 64 bit integer\n", .{
+                    src[token.start..token.end],
                 });
             },
         }
