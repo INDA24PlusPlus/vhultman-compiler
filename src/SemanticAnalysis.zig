@@ -152,7 +152,7 @@ pub fn typeCheckExpression(self: *SemanticAnalysis, node: *const Ast.Node) !Type
                 } });
             }
 
-            return lhs;
+            return .bool;
         },
         .not => {
             const rhs_node = self.ast.nodes.get(node.rhs);
