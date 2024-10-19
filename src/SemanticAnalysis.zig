@@ -188,7 +188,7 @@ pub fn typeCheckExpression(self: *SemanticAnalysis, node: *const Ast.Node) !Type
                 error.Overflow => try self.errors.append(self.gpa, .{
                     .int_to_big = node.token_index,
                 }),
-                else => unreachable,
+                error.InvalidCharacter => unreachable,
             };
 
             return .int;
