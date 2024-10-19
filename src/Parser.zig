@@ -270,8 +270,8 @@ fn parseReturnStatement(self: *Parser) !u32 {
         .token_index = self.token_index,
     });
 
-    if (self.next_token.type == .@";") {
-        try self.advanceTokenStream();
+    if (!try self.expectNext(.@";")) {
+        return error.FailedToParse;
     }
 
     return @intCast(node_index);
@@ -315,7 +315,6 @@ fn parseExpressionStatement(self: *Parser) !u32 {
     if (!try self.expectNext(.@";")) {
         return error.FailedToParse;
     }
-    try self.advanceTokenStream();
 
     self.nodes.set(node_index, .{
         .token_index = token_index,

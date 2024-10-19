@@ -233,8 +233,15 @@ pub fn resolveStatement(self: *SemanticAnalysis, node: *const Ast.Node) anyerror
         .if_statement, .while_loop => try self.resolveIfStatement(node),
         .if_else_statement => try self.resolveIfElseStatement(node),
         .return_statement => try self.resolveReturnStatement(node),
+        .expression_statement => try self.resolveExpressionStatement(node),
         else => unreachable,
     }
+}
+
+fn resolveExpressionStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
+    const expr_node = self.ast.nodes.get(node.rhs);
+    _ = try self.typeCheckExpression(&expr_node);
+    try self.resolveExpression(&expr_node);
 }
 
 fn resolveReturnStatement(self: *SemanticAnalysis, node: *const Ast.Node) !void {
