@@ -1,0 +1,17 @@
+var n = 93; // calculate the 92 fibonacci number.nacci number.
+var a = 0;
+var b = 1;
+
+var i = 2;
+while (i < n) {
+	var temp = a + b;
+	a = b;
+	b = temp;
+	i = i + 1;
+}
+
+// Return value gets auto printed since I was too lazy to implement it here.
+// I will be extending the language to support more features in a
+// up coming rewrite.
+
+return b;

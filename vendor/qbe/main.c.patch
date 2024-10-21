@@ -1,0 +1,59 @@
+--- ../../../../../qbe/main.c	2024-10-12 19:14:56.373560601 +0200
++++ src/main.c	2024-10-20 03:44:29.950364023 +0200
+@@ -114,7 +114,7 @@
+ }
+ 
+ int
+-main(int ac, char *av[])
++invoke(int ac, char *av[])
+ {
+ 	Target **t;
+ 	FILE *inf, *hf;
+@@ -137,19 +137,19 @@
+ 				outf = fopen(optarg, "w");
+ 				if (!outf) {
+ 					fprintf(stderr, "cannot open '%s'\n", optarg);
+-					exit(1);
++					return 1;
+ 				}
+ 			}
+ 			break;
+ 		case 't':
+ 			if (strcmp(optarg, "?") == 0) {
+ 				puts(T.name);
+-				exit(0);
++				return 0;
+ 			}
+ 			for (t=tlist;; t++) {
+ 				if (!*t) {
+ 					fprintf(stderr, "unknown target '%s'\n", optarg);
+-					exit(1);
++					return 1;
+ 				}
+ 				if (strcmp(optarg, (*t)->name) == 0) {
+ 					T = **t;
+@@ -172,7 +172,7 @@
+ 			}
+ 			fprintf(hf, "\n");
+ 			fprintf(hf, "\t%-11s dump debug information\n", "-d <flags>");
+-			exit(c != 'h');
++			return (c != 'h');
+ 		}
+ 
+ 	do {
+@@ -184,7 +184,7 @@
+ 			inf = fopen(f, "r");
+ 			if (!inf) {
+ 				fprintf(stderr, "cannot open '%s'\n", f);
+-				exit(1);
++				return 1;
+ 			}
+ 		}
+ 		parse(inf, f, dbgfile, data, func);
+@@ -194,5 +194,5 @@
+ 	if (!dbg)
+ 		T.emitfin(outf);
+ 
+-	exit(0);
++	return 0;
+ }

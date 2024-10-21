@@ -35,11 +35,13 @@ pub const Token = struct {
         @"{",
         @"}",
         var_stmt,
+        print,
         @"return",
         @"while",
         true,
         false,
         int_literal,
+        string_literal,
         invalid,
         identifier,
         eof,
@@ -51,6 +53,7 @@ const State = enum {
     start,
     identifier,
     int_literal,
+    string_literal,
 };
 
 src: [:0]const u8,
@@ -94,7 +97,14 @@ pub fn next(self: *Tokenizer) Token {
             },
             '/' => {
                 self.index += 1;
-                result.type = .@"/";
+                if (self.src[self.index] == '/') {
+                    while (self.src[self.index] != '\n' and self.src[self.index] != 0) {
+                        self.index += 1;
+                    }
+                    continue :state .start;
+                } else {
+                    result.type = .@"/";
+                }
             },
             '!' => {
                 self.index += 1;
@@ -114,7 +124,6 @@ pub fn next(self: *Tokenizer) Token {
                     result.type = .assign;
                 }
             },
-
             '<' => {
                 self.index += 1;
                 result.type = .@"<";
@@ -187,6 +196,12 @@ pub fn next(self: *Tokenizer) Token {
                     continue :state .int_literal;
                 },
                 else => {},
+            }
+        },
+        .string_literal => {
+            self.index += 1;
+            if (self.src[self.index] == '"' or self.src[self.index] == 0) {} else {
+                continue :state .string_literal;
             }
         },
     }

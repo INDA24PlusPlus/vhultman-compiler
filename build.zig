@@ -10,6 +10,13 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    const qbe = b.dependency("qbe", .{
+        .target = target,
+        .optimize = optimize,
+    });
+    exe.root_module.addImport("qbe", qbe.module("qbe"));
+    exe.linkLibrary(qbe.artifact("qbe"));
     b.installArtifact(exe);
 
     const run_cmd = b.addRunArtifact(exe);

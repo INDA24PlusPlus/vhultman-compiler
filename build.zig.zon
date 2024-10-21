@@ -2,7 +2,11 @@
     .name = "vhultman-compiler",
     .version = "0.0.0",
 
-    .dependencies = .{},
+    .dependencies = .{
+        .qbe = .{
+            .path = "vendor/qbe",
+        },
+    },
 
     .paths = .{
         "build.zig",
