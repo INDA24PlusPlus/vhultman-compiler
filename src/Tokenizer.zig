@@ -2,21 +2,26 @@ const std = @import("std");
 const Tokenizer = @This();
 
 pub const Token = struct {
-    type: Type,
+    kind: Kind,
     start: u32,
     end: u32,
 
-    const keywords = std.StaticStringMap(Type).initComptime(.{
-        .{ "if", .@"if" },
-        .{ "else", .@"else" },
-        .{ "var", .var_stmt },
+    const keywords = std.StaticStringMap(Kind).initComptime(.{
+        .{ "fn", .@"fn" },
+        .{ "var", .@"var" },
+        .{ "const", .@"const" },
         .{ "return", .@"return" },
         .{ "true", .true },
         .{ "false", .false },
-        .{ "while", .@"while" },
+
+        .{ "u8", .primitive_type },
+        .{ "u16", .primitive_type },
+        .{ "u32", .primitive_type },
+        .{ "u64", .primitive_type },
+        .{ "void", .primitive_type },
     });
 
-    pub const Type = enum(u8) {
+    pub const Kind = enum(u8) {
         @"+",
         @"-",
         @"*",
@@ -26,24 +31,28 @@ pub const Token = struct {
         @"==",
         @"<",
         @">",
-        @"if",
-        @"else",
-        assign,
+
+        @"return",
+
+        @"=",
         @";",
+        @":",
         @"(",
         @")",
         @"{",
         @"}",
-        var_stmt,
-        print,
-        @"return",
-        @"while",
+
+        @"var",
+        @"const",
+        @"fn",
+
         true,
         false,
         int_literal,
-        string_literal,
-        invalid,
         identifier,
+        primitive_type,
+
+        invalid,
         eof,
     };
 };
@@ -63,17 +72,12 @@ pub fn init(src: [:0]const u8) Tokenizer {
     return .{ .src = src, .index = 0 };
 }
 
-pub fn next(self: *Tokenizer) Token {
+pub fn next(self: *Tokenizer) ?Token {
     var result: Token = .{
-        .type = undefined,
+        .kind = undefined,
         .start = self.index,
         .end = undefined,
     };
-
-    if (self.index >= self.src.len) {
-        result.type = .eof;
-        return result;
-    }
 
     state: switch (State.start) {
         .start => switch (self.src[self.index]) {
@@ -85,15 +89,15 @@ pub fn next(self: *Tokenizer) Token {
             // Could combine these if we commit to having a fixed enum order.
             '+' => {
                 self.index += 1;
-                result.type = .@"+";
+                result.kind = .@"+";
             },
             '-' => {
                 self.index += 1;
-                result.type = .@"-";
+                result.kind = .@"-";
             },
             '*' => {
                 self.index += 1;
-                result.type = .@"*";
+                result.kind = .@"*";
             },
             '/' => {
                 self.index += 1;
@@ -103,74 +107,78 @@ pub fn next(self: *Tokenizer) Token {
                     }
                     continue :state .start;
                 } else {
-                    result.type = .@"/";
+                    result.kind = .@"/";
                 }
             },
             '!' => {
                 self.index += 1;
                 if (self.src[self.index] == '=') {
                     self.index += 1;
-                    result.type = .@"!=";
+                    result.kind = .@"!=";
                 } else {
-                    result.type = .@"!";
+                    result.kind = .@"!";
                 }
             },
             '=' => {
                 self.index += 1;
                 if (self.src[self.index] == '=') {
                     self.index += 1;
-                    result.type = .@"==";
+                    result.kind = .@"==";
                 } else {
-                    result.type = .assign;
+                    result.kind = .@"=";
                 }
             },
             '<' => {
                 self.index += 1;
-                result.type = .@"<";
+                result.kind = .@"<";
             },
             '>' => {
                 self.index += 1;
-                result.type = .@">";
+                result.kind = .@">";
             },
             ';' => {
                 self.index += 1;
-                result.type = .@";";
+                result.kind = .@";";
+            },
+            ':' => {
+                self.index += 1;
+                result.kind = .@":";
             },
             '(' => {
                 self.index += 1;
-                result.type = .@"(";
+                result.kind = .@"(";
             },
             ')' => {
                 self.index += 1;
-                result.type = .@")";
+                result.kind = .@")";
             },
             '{' => {
                 self.index += 1;
-                result.type = .@"{";
+                result.kind = .@"{";
             },
             '}' => {
                 self.index += 1;
-                result.type = .@"}";
+                result.kind = .@"}";
             },
             'a'...'z', 'A'...'Z', '_' => {
-                result.type = .identifier;
+                result.kind = .identifier;
                 continue :state .identifier;
             },
             '0'...'9' => {
-                result.type = .int_literal;
+                result.kind = .int_literal;
                 continue :state .int_literal;
             },
             0 => {
                 if (self.index >= self.src.len) {
-                    result.type = .eof;
+                    return null;
                 } else {
-                    result.type = .invalid;
+                    result.kind = .invalid;
                 }
 
                 self.index += 1;
             },
             else => {
-                result.type = .invalid;
+                result.kind = .invalid;
                 self.index += 1;
             },
         },
@@ -184,7 +192,7 @@ pub fn next(self: *Tokenizer) Token {
                 else => {
                     const identifier_string = self.src[result.start..self.index];
                     if (Token.keywords.get(identifier_string)) |t| {
-                        result.type = t;
+                        result.kind = t;
                     }
                 },
             }
@@ -208,19 +216,4 @@ pub fn next(self: *Tokenizer) Token {
 
     result.end = self.index;
     return result;
-}
-
-test next {
-    const global = struct {
-        fn testOne(input: []const u8) anyerror!void {
-            const inputZ = try std.testing.allocator.dupeZ(u8, input);
-            defer std.testing.allocator.free(inputZ);
-
-            var tokenizer = Tokenizer.init(inputZ);
-            while (tokenizer.next()) |token| {
-                _ = token;
-            }
-        }
-    };
-    try std.testing.fuzz(global.testOne, .{});
 }

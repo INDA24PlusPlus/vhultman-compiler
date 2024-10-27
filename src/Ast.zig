@@ -1,118 +1,58 @@
 const std = @import("std");
 const Ast = @This();
-const Token = @import("Tokenizer.zig").Token;
 const Allocator = std.mem.Allocator;
+const Token = @import("Tokenizer.zig").Token;
+const TokenSlice = std.MultiArrayList(Token).Slice;
 
 pub const Node = struct {
-    type: Type,
+    kind: Kind,
     lhs: u32,
     rhs: u32,
-    token_index: u32,
+    token: u32,
 
-    pub const Type = enum(u8) {
-        program, // lhs -> number of children, rhs -> index to extras with children indices.
-        block,
+    pub const Kind = enum(u8) {
+        root,
 
-        var_statement, // lhs -> ident, rhs -> expr,
-        assignment_statement, // lhs -> ident, rhs -> expr,
+        fn_decl,
 
-        return_statement, // lhs -> expression
-        expression_statement, // lhs -> child expression.
-        negate, // rhs -> operand
-        not, // rhs -> operand
-
-        if_statement, // lhs -> condition, rhs -> body
-        if_else_statement, // lhs -> condition, rhs -> index to extras with indices to body and else-body.
-        while_loop, // lhs -> condition, rhs -> body.
-
-        // binary operations, lhs, rhs are respective operands.
-        add,
-        sub,
-        mul,
-        div,
-        equal,
-        not_equal,
-        less_than,
-        greater_than,
-
-        // leafs.
         identifier,
-        int_literal,
-        bool_literal,
+        type_identifier,
     };
 };
 
-tokens: std.MultiArrayList(Token),
+src: []const u8,
 nodes: std.MultiArrayList(Node),
-extra: []u32,
-src: [:0]const u8,
+extra: std.ArrayListUnmanaged(u32),
+tokens: TokenSlice,
 
 pub fn deinit(self: *Ast, gpa: Allocator) void {
-    self.tokens.deinit(gpa);
     self.nodes.deinit(gpa);
-    gpa.free(self.extra);
+    self.extra.deinit(gpa);
+    self.tokens.deinit(gpa);
 }
 
-pub fn print(ast: Ast, writer: anytype, depth: u32, node_idx: u32) anyerror!void {
-
-    // Write indent.
+pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void {
     for (0..depth) |_| {
-        try writer.print("  ", .{});
+        _ = try writer.write("  ");
     }
 
-    const node = ast.nodes.get(node_idx);
-
-    // Write node.
-    if (node.type == .int_literal or node.type == .identifier) {
-        const token = ast.tokens.get(node.token_index);
-        try writer.print("{s}: {s}\n", .{ @tagName(node.type), ast.src[token.start..token.end] });
-    } else {
-        try writer.print("{s}\n", .{@tagName(node.type)});
-    }
-
-    // Write children.
-    switch (node.type) {
-        .add,
-        .sub,
-        .mul,
-        .div,
-        .equal,
-        .not_equal,
-        .less_than,
-        .greater_than,
-        .var_statement,
-        .if_statement,
-        .assignment_statement,
-        .while_loop,
-        => {
-            try ast.print(writer, depth + 1, node.lhs);
-            try ast.print(writer, depth + 1, node.rhs);
-        },
-        .not, .negate => {
-            try ast.print(writer, depth + 1, node.rhs);
-        },
-        .program, .block => {
-            const child_count = node.lhs;
-            const child_indices = node.rhs;
-            for (ast.extra[child_indices .. child_indices + child_count]) |index| {
-                try ast.print(writer, depth + 1, index);
+    const node = self.nodes.get(node_idx);
+    switch (node.kind) {
+        .root => {
+            try writer.print("{s}\n", .{@tagName(node.kind)});
+            const children = self.extra.items[node.rhs .. node.rhs + node.lhs];
+            for (children) |child| {
+                try self.print(writer, child, depth + 1);
             }
         },
-        .if_else_statement => {
-            const extra_index = node.rhs;
-            const condition = node.lhs;
-            const if_body = ast.extra[extra_index + 0];
-            const else_body = ast.extra[extra_index + 1];
-
-            try ast.print(writer, depth + 1, condition);
-            try ast.print(writer, depth + 1, if_body);
-            try ast.print(writer, depth + 1, else_body);
+        .fn_decl => {
+            try writer.print("{s}\n", .{@tagName(node.kind)});
+            try self.print(writer, node.lhs, depth + 1);
+            try self.print(writer, node.rhs, depth + 1);
         },
-        .expression_statement, .return_statement => {
-            try ast.print(writer, depth + 1, node.lhs);
+        .identifier, .type_identifier => {
+            const token = self.tokens.get(node.token);
+            try writer.print("{s}: {s}\n", .{ @tagName(node.kind), self.src[token.start..token.end] });
         },
-
-        // leaf nodes.
-        .int_literal, .identifier, .bool_literal => return,
     }
 }
