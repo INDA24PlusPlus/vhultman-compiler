@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Tokenizer = @import("Tokenizer.zig");
 const Parser = @import("Parser.zig");
+const Sema = @import("Sema.zig");
 const assert = std.debug.assert;
 
 pub fn main() !void {
@@ -9,24 +10,64 @@ pub fn main() !void {
     defer assert(gpa_state.deinit() == .ok);
     const gpa = gpa_state.allocator();
 
+    var bw = std.io.bufferedWriter(std.io.getStdErr().writer());
+    const err_writer = bw.writer();
+
     const args = try std.process.argsAlloc(gpa);
     defer std.process.argsFree(gpa, args);
 
-    const src = try std.fs.cwd().readFileAllocOptions(
-        gpa,
-        args[1],
-        std.math.maxInt(u32),
-        null,
-        std.mem.page_size,
-        0,
-    );
+    const file_path = args[1];
+
+    const src = blk: {
+        const src = try std.fs.cwd().readFileAllocOptions(
+            gpa,
+            file_path,
+            std.math.maxInt(u32),
+            null,
+            std.mem.page_size,
+            0,
+        );
+        defer gpa.free(src);
+
+        const tab_free_src = try tabToSpace(gpa, src);
+        break :blk tab_free_src;
+    };
     defer gpa.free(src);
 
     var parser = try Parser.init(gpa, src);
     defer parser.deinit();
 
-    var ast = try parser.parse();
+    const parse_result = parser.parse();
+    if (parse_result == error.HadParseError) {
+        for (parser.errors.items) |*err| {
+            try err.print(err_writer, src, file_path);
+        }
+        try bw.flush();
+        std.process.fatal("Compilation failed", .{});
+    }
+
+    var ast = try parse_result;
     defer ast.deinit(gpa);
 
     try ast.print(std.io.getStdOut().writer(), 0, 0);
+
+    var sema = try Sema.init(gpa, &ast);
+    try sema.resolve();
+}
+
+fn tabToSpace(gpa: Allocator, src: [:0]const u8) ![:0]const u8 {
+    var new_src = try std.ArrayList(u8).initCapacity(gpa, src.len);
+    for (src) |c| {
+        if (c == '\t') {
+            try new_src.appendNTimes(' ', 4);
+        } else {
+            try new_src.append(c);
+        }
+    }
+
+    if (new_src.items.len > std.math.maxInt(u32)) {
+        return error.FileToBig;
+    }
+
+    return try new_src.toOwnedSliceSentinel(0);
 }

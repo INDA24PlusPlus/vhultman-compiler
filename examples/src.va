@@ -1,1 +1,8 @@
-fn main() void
+fn foo(a: u32, b: u32) u32 {
+}
+
+fn main() void {
+	var a: u32 = (5 + 3) * 9;
+	const b: u32 = foo(5 + 1, a);
+}
+

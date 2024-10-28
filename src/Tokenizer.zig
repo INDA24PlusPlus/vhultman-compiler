@@ -37,6 +37,7 @@ pub const Token = struct {
         @"=",
         @";",
         @":",
+        @",",
         @"(",
         @")",
         @"{",
@@ -55,6 +56,39 @@ pub const Token = struct {
         invalid,
         eof,
     };
+
+    pub const LineInfo = struct {
+        line_number: u32,
+        column_number: u32,
+        line: []const u8,
+    };
+
+    pub fn computeLineInfo(self: Token, src: []const u8) LineInfo {
+        var line_number: u32 = 0;
+        var line_start: usize = 0;
+        var idx: usize = 0;
+
+        while (idx < self.end) {
+            line_start = idx;
+            idx += std.mem.indexOfScalar(u8, src[idx..], '\n') orelse {
+                idx = src.len - 1;
+                line_number += 1;
+                break;
+            };
+            idx += 1;
+            line_number += 1;
+        }
+
+        idx -= 1;
+        const line_slice = src[line_start..idx];
+        const column_number = self.start - line_start + 1;
+
+        return .{
+            .line_number = line_number,
+            .column_number = @intCast(column_number),
+            .line = line_slice,
+        };
+    }
 };
 
 // Only having one enum value in this will crash the compiler ¯\_(ツ)_/¯
@@ -143,6 +177,10 @@ pub fn next(self: *Tokenizer) ?Token {
             ':' => {
                 self.index += 1;
                 result.kind = .@":";
+            },
+            ',' => {
+                self.index += 1;
+                result.kind = .@",";
             },
             '(' => {
                 self.index += 1;
