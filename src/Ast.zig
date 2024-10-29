@@ -50,6 +50,26 @@ pub const Node = struct {
         int_literal,
         type_identifier,
     };
+
+    pub fn isBinOp(self: Node) bool {
+        return switch (self.kind) {
+            .add,
+            .sub,
+            .mul,
+            .div,
+            .equal,
+            .not_equal,
+            .less_than,
+            .greater_than,
+            => true,
+            else => false,
+        };
+    }
+
+    pub fn isUnaryOp(self: Node) bool {
+        _ = self;
+        return false;
+    }
 };
 
 src: []const u8,

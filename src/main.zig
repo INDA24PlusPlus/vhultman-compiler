@@ -52,7 +52,15 @@ pub fn main() !void {
     try ast.print(std.io.getStdOut().writer(), 0, 0);
 
     var sema = try Sema.init(gpa, &ast);
-    try sema.resolve();
+    defer sema.deinit();
+
+    if (sema.resolve() == error.HadSemaError) {
+        for (sema.errors.items) |*err| {
+            try err.print(err_writer, src, file_path);
+        }
+        try bw.flush();
+        std.process.fatal("Compilation failed", .{});
+    }
 }
 
 fn tabToSpace(gpa: Allocator, src: [:0]const u8) ![:0]const u8 {
