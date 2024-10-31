@@ -279,6 +279,7 @@ fn parseStatement(self: *Parser) !u32 {
     return switch (self.next_token.kind) {
         .@"var" => self.parseVarDecl(),
         .@"const" => self.parseConstDecl(),
+        .@"return" => self.parseReturn(),
         else => {
             try self.errors.append(self.gpa, .{
                 .kind = .expected_statement,
@@ -287,6 +288,23 @@ fn parseStatement(self: *Parser) !u32 {
             return error.ParseError;
         },
     };
+}
+
+fn parseReturn(self: *Parser) !u32 {
+    try self.expectNext(.@"return");
+    const node_index = try self.nodes.addOne(self.gpa);
+    const token = self.currentTokenIndex();
+    const expr = try self.parseExpression(.none);
+    try self.expectNext(.@";");
+
+    self.nodes.set(node_index, .{
+        .kind = .return_statement,
+        .lhs = expr,
+        .rhs = undefined,
+        .token = token,
+    });
+
+    return @intCast(node_index);
 }
 
 fn parseVarDecl(self: *Parser) !u32 {

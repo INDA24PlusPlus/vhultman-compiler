@@ -45,6 +45,8 @@ pub const Node = struct {
         less_than,
         greater_than,
 
+        return_statement, // lhs -> expr.
+
         // leaf nodes. lhs and rhs are unused.
         identifier,
         int_literal,
@@ -112,6 +114,10 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
             try writer.print("{s}\n", .{@tagName(node.kind)});
             try self.print(writer, node.lhs, depth + 1);
             try self.print(writer, node.rhs, depth + 1);
+        },
+        .return_statement => {
+            try writer.print("{s}\n", .{@tagName(node.kind)});
+            try self.print(writer, node.lhs, depth + 1);
         },
         .identifier, .type_identifier, .int_literal => {
             const token = self.tokens.get(node.token);
