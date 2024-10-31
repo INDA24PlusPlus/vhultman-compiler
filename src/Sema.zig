@@ -71,7 +71,7 @@ fn resolveFunction(self: *Sema, node: *const Ast.Node) !void {
         const arg_node = self.ast.nodes.get(node_index);
         const bytes = self.srcBytes(arg_node.lhs);
         log.debug("putting in {s} with type {}", .{ bytes, arg_type });
-        try self.sym_table.put(self.gpa, .{ .type = arg_type, .token = arg_node.lhs }, bytes);
+        try self.sym_table.put(self.gpa, .{ .type = arg_type, .token = arg_node.lhs, .is_const = true }, bytes);
     }
 
     const has_return = try self.resolveBlock(&block_node, fn_header.return_type);
@@ -87,7 +87,7 @@ fn resolveFunction(self: *Sema, node: *const Ast.Node) !void {
     self.sym_table.exitScope(self.gpa);
 }
 
-fn resolveBlock(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) !bool {
+fn resolveBlock(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) anyerror!bool {
     const children = self.ast.extra.items[node.rhs .. node.rhs + node.lhs];
     var has_return = false;
     for (children) |stmt| {
@@ -103,11 +103,77 @@ fn resolveStatement(self: *Sema, node: *const Ast.Node, return_type: TypeHandle)
             try self.resolveVarDecl(node);
             return false;
         },
+        .assignment => {
+            try self.resolveAssignment(node);
+            return false;
+        },
+        .block => {
+            return try self.resolveBlock(node, return_type);
+        },
+        .if_statement => {
+            // TODO: fix this return resolution shit. Ideally I don't want to do a CFG, but it is lookg more likely I have to.
+            return try self.resolveIf(node, return_type);
+        },
         .return_statement => {
             try self.resolveReturn(node, return_type);
             return true;
         },
         else => std.debug.panic("Semantic analysis not supported for {}", .{node.kind}),
+    }
+}
+
+fn resolveIf(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) anyerror!bool {
+    const cond = self.ast.nodes.get(self.ast.extra.items[node.rhs]);
+    const body = self.ast.nodes.get(self.ast.extra.items[node.rhs + 1]);
+
+    const cond_type = try self.typeCheckExpression(&cond);
+    if (!cond_type.coercesTo(.bool)) {
+        try self.errors.append(self.gpa, .{
+            .kind = .expected_type,
+            .token = self.ast.tokens.get(node.token),
+            .type1 = .bool,
+            .type2 = cond_type,
+        });
+    }
+
+    _ = try self.resolveStatement(&body, return_type);
+    if (node.lhs == 3) {
+        const else_body = self.ast.nodes.get(self.ast.extra.items[node.rhs + 2]);
+        return try self.resolveStatement(&else_body, return_type);
+    }
+
+    return false;
+}
+
+fn resolveAssignment(self: *Sema, node: *const Ast.Node) !void {
+    const identifier = self.ast.nodes.get(node.lhs);
+    const ident_token = self.ast.tokens.get(identifier.token);
+    const expression = self.ast.nodes.get(node.rhs);
+
+    if (self.sym_table.get(identifier.srcBytes(self.ast))) |sym| {
+        if (sym.is_const) {
+            try self.errors.append(self.gpa, .{
+                .kind = .reassign_of_const,
+                .token = ident_token,
+            });
+
+            return;
+        }
+
+        const expr_type = try self.typeCheckExpression(&expression);
+        if (!expr_type.coercesTo(sym.type)) {
+            try self.errors.append(self.gpa, .{
+                .kind = .mismatched_assign_type,
+                .token = ident_token,
+                .type1 = sym.type,
+                .type2 = expr_type,
+            });
+        }
+    } else {
+        try self.errors.append(self.gpa, .{
+            .kind = .use_of_undecl_ident,
+            .token = ident_token,
+        });
     }
 }
 
@@ -160,7 +226,11 @@ fn resolveVarDecl(self: *Sema, node: *const Ast.Node) !void {
             .other_tok = self.ast.tokens.get(sym.token),
         });
     } else {
-        try self.sym_table.put(self.gpa, .{ .token = ident_token, .type = specified_type }, bytes);
+        try self.sym_table.put(self.gpa, .{
+            .token = ident_token,
+            .type = specified_type,
+            .is_const = is_const,
+        }, bytes);
     }
 
     std.debug.print("is const? {}: {s}\n", .{ is_const, bytes });
@@ -172,15 +242,13 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
         .sub,
         .mul,
         .div,
-        .less_than,
-        .greater_than,
         => {
             const lhs_node = self.ast.nodes.get(node.lhs);
             const rhs_node = self.ast.nodes.get(node.rhs);
             const lhs_type = try self.typeCheckExpression(&lhs_node);
             const rhs_type = try self.typeCheckExpression(&rhs_node);
 
-            if (lhs_type != rhs_type and lhs_type != .undefined and rhs_type != .undefined) {
+            const largest_type = if (lhs_type.coercesTo(rhs_type)) rhs_type else if (rhs_type.coercesTo(lhs_type)) lhs_type else blk: {
                 try self.errors.append(self.gpa, .{
                     .kind = .invalid_types_for_op,
                     .token = self.ast.tokens.get(lhs_node.token),
@@ -188,9 +256,22 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                     .type1 = lhs_type,
                     .type2 = rhs_type,
                 });
-            }
 
-            if (!lhs_type.isNumeric()) {
+                // will coerce to any int type so we use this as substuite incase of error.
+                break :blk .int_literal;
+            };
+
+            //if (lhs_type != rhs_type and lhs_type != .undefined and rhs_type != .undefined) {
+            //    try self.errors.append(self.gpa, .{
+            //        .kind = .invalid_types_for_op,
+            //        .token = self.ast.tokens.get(lhs_node.token),
+            //        .other_tok = self.ast.tokens.get(lhs_node.token),
+            //        .type1 = lhs_type,
+            //        .type2 = rhs_type,
+            //    });
+            //}
+
+            if (!largest_type.isNumeric()) {
                 try self.errors.append(self.gpa, .{
                     .kind = .expected_numeric_type,
                     .token = self.ast.tokens.get(lhs_node.token),
@@ -200,7 +281,7 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                 });
             }
 
-            return lhs_type;
+            return largest_type;
         },
         .int_literal => {
             _ = std.fmt.parseUnsigned(u64, self.srcBytesNode(node), 10) catch |err| switch (err) {
@@ -209,6 +290,7 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
             };
             return .int_literal;
         },
+        .bool_literal => return .bool,
         .identifier => {
             const ident_token = self.ast.tokens.get(node.token);
             const bytes = self.ast.src[ident_token.start..ident_token.end];
@@ -235,8 +317,17 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                 });
                 return .undefined;
             };
-
             const arg_nodes = self.ast.extra.items[node.rhs + 1 .. node.rhs + node.lhs];
+            if (arg_nodes.len != info.args.len) {
+                try self.errors.append(self.gpa, .{
+                    .kind = .wrong_arg_count,
+                    .token = self.ast.tokens.get(self.ast.nodes.items(.token)[fn_name]),
+                    .type1 = @enumFromInt(info.args.len),
+                    .type2 = @enumFromInt(arg_nodes.len),
+                });
+                return info.return_type;
+            }
+
             for (arg_nodes, info.args) |arg_node_index, parameter_type| {
                 const arg_node = self.ast.nodes.get(arg_node_index);
                 const arg_expr_type = try self.typeCheckExpression(&arg_node);
@@ -251,8 +342,42 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
             }
             return info.return_type;
         },
+        // int comparisions.
+        .less_than,
+        .greater_than,
+        .less_than_equal,
+        .greater_than_equal,
+        => {
+            const lhs_node = self.ast.nodes.get(node.lhs);
+            const rhs_node = self.ast.nodes.get(node.rhs);
+            const lhs_type = try self.typeCheckExpression(&lhs_node);
+            const rhs_type = try self.typeCheckExpression(&rhs_node);
 
-        .equal, .not_equal => {
+            if (!rhs_type.coercesTo(lhs_type)) {
+                try self.errors.append(self.gpa, .{
+                    .kind = .invalid_types_for_op,
+                    .token = self.ast.tokens.get(lhs_node.token),
+                    .other_tok = self.ast.tokens.get(lhs_node.token),
+                    .type1 = lhs_type,
+                    .type2 = rhs_type,
+                });
+            }
+
+            if (!lhs_type.isNumeric()) {
+                try self.errors.append(self.gpa, .{
+                    .kind = .expected_numeric_type,
+                    .token = self.ast.tokens.get(lhs_node.token),
+                    .other_tok = self.ast.tokens.get(lhs_node.token),
+                    .type1 = lhs_type,
+                    .type2 = rhs_type,
+                });
+            }
+
+            return .bool;
+        },
+        .equal,
+        .not_equal,
+        => {
             const lhs_node = self.ast.nodes.get(node.lhs);
             const rhs_node = self.ast.nodes.get(node.rhs);
             const lhs_type = try self.typeCheckExpression(&lhs_node);
@@ -371,6 +496,13 @@ const TypeHandle = enum(u32) {
         .{ "u16", .u16 },
         .{ "u32", .u32 },
         .{ "u64", .u64 },
+        .{ "i8", .i8 },
+        .{ "i16", .i16 },
+        .{ "i32", .i32 },
+        .{ "i64", .i64 },
+        .{ "f32", .f32 },
+        .{ "f64", .f64 },
+        .{ "bool", .bool },
         .{ "void", .void },
     });
 
@@ -470,6 +602,7 @@ const FunctionHeader = struct {
 const Symbol = struct {
     token: u32,
     type: TypeHandle,
+    is_const: bool, // bad but whatever.
 };
 
 const SymbolTable = struct {
@@ -538,6 +671,10 @@ pub const SemaError = struct {
         incorrect_main_args,
         incorrect_main_ret_type,
         missing_return,
+        wrong_arg_count,
+        reassign_of_const,
+        mismatched_assign_type,
+        expected_type,
     };
 
     pub fn print(self: SemaError, writer: anytype, src: []const u8, file_name: []const u8) !void {
@@ -570,6 +707,9 @@ pub const SemaError = struct {
             .mismatched_specifier_type => {
                 try writer.print("Mismatched types between specifier ({s}) and expression ({s})\n", .{ @tagName(self.type1), @tagName(self.type2) });
             },
+            .mismatched_assign_type => {
+                try writer.print("Mismatched types between identifier ({s}) and assignment expression ({s})\n", .{ @tagName(self.type1), @tagName(self.type2) });
+            },
             .invalid_types_for_op => {
                 try writer.print("Invalid types for operation ({s} and {s})\n", .{ @tagName(self.type1), @tagName(self.type2) });
             },
@@ -592,7 +732,16 @@ pub const SemaError = struct {
                 try writer.print("main function must return type void\n", .{});
             },
             .missing_return => {
-                try writer.print("Function \"{s}\" with return type {s} has no return statements\n", .{ src[self.other_tok.?.start..self.other_tok.?.end], @tagName(self.type1) });
+                try writer.print("Function \"{s}\" with return type {s} has code paths that don't return\n", .{ src[self.other_tok.?.start..self.other_tok.?.end], @tagName(self.type1) });
+            },
+            .wrong_arg_count => {
+                try writer.print("Expected {d} arguments to function call but found {d}\n", .{ @intFromEnum(self.type1), @intFromEnum(self.type2) });
+            },
+            .reassign_of_const => {
+                try writer.print("Cannot reassign a constant\n", .{});
+            },
+            .expected_type => {
+                try writer.print("Expected type {s} but found type {s}\n", .{ @tagName(self.type1), @tagName(self.type2) });
             },
         }
 

@@ -31,9 +31,16 @@ pub const Node = struct {
         // extra[1..child_count] = expression.
         fn_call,
 
+        // lhs -> child_count, rhs -> extra_index,
+        // extra[0] = cond.
+        // extra[1] = body,
+        // extra[3] = maybe_else_body,
+        if_statement,
+
         var_decl, // lhs -> type_specifier, rhs -> expression
         const_decl, // lhs -> type_specifier, rhs -> expression
         type_specifier, // lhs -> identifier, rhs -> type_identifier
+        assignment, // lhs -> identifier, rhs -> expression
 
         // binary ops
         add,
@@ -44,12 +51,15 @@ pub const Node = struct {
         not_equal,
         less_than,
         greater_than,
+        less_than_equal,
+        greater_than_equal,
 
         return_statement, // lhs -> expr.
 
         // leaf nodes. lhs and rhs are unused.
         identifier,
         int_literal,
+        bool_literal,
         type_identifier,
     };
 
@@ -63,6 +73,8 @@ pub const Node = struct {
             .not_equal,
             .less_than,
             .greater_than,
+            .less_than_equal,
+            .greater_than_equal,
             => true,
             else => false,
         };
@@ -71,6 +83,11 @@ pub const Node = struct {
     pub fn isUnaryOp(self: Node) bool {
         _ = self;
         return false;
+    }
+
+    pub fn srcBytes(self: Node, ast: *const Ast) []const u8 {
+        const tok = ast.tokens.get(self.token);
+        return ast.src[tok.start..tok.end];
     }
 };
 
@@ -92,7 +109,7 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
 
     const node = self.nodes.get(node_idx);
     switch (node.kind) {
-        .root, .block, .fn_decl, .fn_call => {
+        .root, .block, .fn_decl, .fn_call, .if_statement => {
             try writer.print("{s}\n", .{@tagName(node.kind)});
             const children = self.extra.items[node.rhs .. node.rhs + node.lhs];
             for (children) |child| {
@@ -110,6 +127,9 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
         .not_equal,
         .less_than,
         .greater_than,
+        .assignment,
+        .less_than_equal,
+        .greater_than_equal,
         => {
             try writer.print("{s}\n", .{@tagName(node.kind)});
             try self.print(writer, node.lhs, depth + 1);
@@ -119,7 +139,11 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
             try writer.print("{s}\n", .{@tagName(node.kind)});
             try self.print(writer, node.lhs, depth + 1);
         },
-        .identifier, .type_identifier, .int_literal => {
+        .identifier,
+        .type_identifier,
+        .int_literal,
+        .bool_literal,
+        => {
             const token = self.tokens.get(node.token);
             try writer.print("{s}: {s}\n", .{ @tagName(node.kind), self.src[token.start..token.end] });
         },

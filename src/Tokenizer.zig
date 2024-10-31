@@ -11,13 +11,22 @@ pub const Token = struct {
         .{ "var", .@"var" },
         .{ "const", .@"const" },
         .{ "return", .@"return" },
-        .{ "true", .true },
-        .{ "false", .false },
+        .{ "true", .bool_literal },
+        .{ "false", .bool_literal },
+        .{ "if", .@"if" },
+        .{ "else", .@"else" },
 
         .{ "u8", .primitive_type },
         .{ "u16", .primitive_type },
         .{ "u32", .primitive_type },
         .{ "u64", .primitive_type },
+        .{ "i8", .primitive_type },
+        .{ "i16", .primitive_type },
+        .{ "i32", .primitive_type },
+        .{ "i64", .primitive_type },
+        .{ "f32", .primitive_type },
+        .{ "f64", .primitive_type },
+        .{ "bool", .primitive_type },
         .{ "void", .primitive_type },
     });
 
@@ -31,6 +40,8 @@ pub const Token = struct {
         @"==",
         @"<",
         @">",
+        @"<=",
+        @">=",
 
         @"return",
 
@@ -46,9 +57,10 @@ pub const Token = struct {
         @"var",
         @"const",
         @"fn",
+        @"if",
+        @"else",
 
-        true,
-        false,
+        bool_literal,
         int_literal,
         identifier,
         primitive_type,
@@ -164,11 +176,21 @@ pub fn next(self: *Tokenizer) ?Token {
             },
             '<' => {
                 self.index += 1;
-                result.kind = .@"<";
+                if (self.src[self.index] == '=') {
+                    self.index += 1;
+                    result.kind = .@"<=";
+                } else {
+                    result.kind = .@"<";
+                }
             },
             '>' => {
                 self.index += 1;
-                result.kind = .@">";
+                if (self.src[self.index] == '=') {
+                    self.index += 1;
+                    result.kind = .@">=";
+                } else {
+                    result.kind = .@">";
+                }
             },
             ';' => {
                 self.index += 1;

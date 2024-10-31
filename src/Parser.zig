@@ -115,7 +115,7 @@ const Precedence = enum {
 fn currentPrecedence(self: *Parser) Precedence {
     return switch (self.curr_token.kind) {
         .@"==", .@"!=" => .equals,
-        .@"<", .@">" => .greater_less,
+        .@"<", .@">", .@"<=", .@">=" => .greater_less,
         .@"+", .@"-" => .add,
         .@"*", .@"/" => .mul,
         .@"(" => .call,
@@ -126,7 +126,7 @@ fn currentPrecedence(self: *Parser) Precedence {
 fn nextPrecedence(self: *Parser) Precedence {
     return switch (self.next_token.kind) {
         .@"==", .@"!=" => .equals,
-        .@"<", .@">" => .greater_less,
+        .@"<", .@">", .@"<=", .@">=" => .greater_less,
         .@"+", .@"-" => .add,
         .@"*", .@"/" => .mul,
         .@"(" => .call,
@@ -280,6 +280,9 @@ fn parseStatement(self: *Parser) !u32 {
         .@"var" => self.parseVarDecl(),
         .@"const" => self.parseConstDecl(),
         .@"return" => self.parseReturn(),
+        .@"if" => self.parseIf(),
+        .@"{" => self.parseBlock(),
+        .identifier => self.parseAssignment(),
         else => {
             try self.errors.append(self.gpa, .{
                 .kind = .expected_statement,
@@ -288,6 +291,58 @@ fn parseStatement(self: *Parser) !u32 {
             return error.ParseError;
         },
     };
+}
+
+fn parseIf(self: *Parser) !u32 {
+    try self.expectNext(.@"if");
+    const node_index = try self.nodes.addOne(self.gpa);
+    const token = self.currentTokenIndex();
+    try self.expectNext(.@"(");
+    const cond = try self.parseExpression(.none);
+    try self.expectNext(.@")");
+    const body = try self.parseStatement();
+
+    var child_nodes = try std.ArrayListUnmanaged(u32).initCapacity(self.gpa, 3);
+    defer child_nodes.deinit(self.gpa);
+    try child_nodes.append(self.gpa, cond);
+    try child_nodes.append(self.gpa, body);
+
+    if (self.next_token.kind == .@"else") {
+        self.advanceTokenStream();
+        const else_body = try self.parseStatement();
+        try child_nodes.append(self.gpa, else_body);
+    }
+
+    const child_count = child_nodes.items.len;
+    const extra_index = self.extra.items.len;
+    try self.extra.appendSlice(self.gpa, child_nodes.items);
+
+    self.nodes.set(node_index, .{
+        .kind = .if_statement,
+        .lhs = @intCast(child_count),
+        .rhs = @intCast(extra_index),
+        .token = token,
+    });
+
+    return @intCast(node_index);
+}
+
+fn parseAssignment(self: *Parser) !u32 {
+    const identifier = try self.parseIdentifier();
+    const node_index = try self.nodes.addOne(self.gpa);
+    try self.expectNext(.@"=");
+    const token = self.currentTokenIndex();
+
+    const expr = try self.parseExpression(.none);
+    try self.expectNext(.@";");
+    self.nodes.set(node_index, .{
+        .kind = .assignment,
+        .lhs = identifier,
+        .rhs = expr,
+        .token = token,
+    });
+
+    return @intCast(node_index);
 }
 
 fn parseReturn(self: *Parser) !u32 {
@@ -351,6 +406,7 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!u32 {
     var lhs = switch (self.next_token.kind) {
         .identifier => try self.parseIdentifier(),
         .int_literal => try self.parseIntLiteral(),
+        .bool_literal => try self.parseBoolLiteral(),
         .@"(" => try self.parseGroupExpression(),
         else => {
             try self.errors.append(self.gpa, .{ .kind = .expected_expression, .error_token = self.next_token });
@@ -368,6 +424,8 @@ fn parseExpression(self: *Parser, precedence: Precedence) anyerror!u32 {
             .@"!=",
             .@"<",
             .@">",
+            .@"<=",
+            .@">=",
             => blk: {
                 break :blk try self.parseBinaryExpression(lhs);
             },
@@ -437,6 +495,8 @@ fn parseBinaryExpression(self: *Parser, lhs: u32) !u32 {
             .@"!=" => .not_equal,
             .@"<" => .less_than,
             .@">" => .greater_than,
+            .@"<=" => .less_than_equal,
+            .@">=" => .greater_than_equal,
             else => unreachable,
         },
         .rhs = rhs,
@@ -461,6 +521,18 @@ fn parseTypeSpecifier(self: *Parser) !u32 {
     });
 
     return @intCast(node_index);
+}
+
+fn parseBoolLiteral(self: *Parser) !u32 {
+    try self.expectNext(.bool_literal);
+    try self.nodes.append(self.gpa, .{
+        .kind = .bool_literal,
+        .token = self.currentTokenIndex(),
+        .rhs = undefined,
+        .lhs = undefined,
+    });
+
+    return @intCast(self.nodes.len - 1);
 }
 
 fn parseIntLiteral(self: *Parser) !u32 {

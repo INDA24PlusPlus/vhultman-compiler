@@ -1,7 +1,13 @@
-fn add(a: u32, b: u32) u32 {
-}
-
 fn main() void {
-	const hello: u64 = add(10, 10);
+	var b: u64 = foo(10);
+	var what: u32 = 10;
+	var c: u64 = b + what;
 }
+// does this work?
+fn foo(n: u64) u64 {
+	if (n <= 1) {
+		return n;
+	}
 
+	return foo(n - 1) + foo(n - 2);
+}
