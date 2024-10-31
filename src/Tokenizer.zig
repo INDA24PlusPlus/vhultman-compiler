@@ -16,6 +16,7 @@ pub const Token = struct {
         .{ "if", .@"if" },
         .{ "else", .@"else" },
         .{ "while", .@"while" },
+        .{ "print", .print },
 
         .{ "u8", .primitive_type },
         .{ "u16", .primitive_type },
@@ -61,9 +62,11 @@ pub const Token = struct {
         @"if",
         @"else",
         @"while",
+        print,
 
         bool_literal,
         int_literal,
+        string_literal,
         identifier,
         primitive_type,
 
@@ -222,6 +225,11 @@ pub fn next(self: *Tokenizer) ?Token {
                 self.index += 1;
                 result.kind = .@"}";
             },
+            '"' => {
+                std.debug.print("here\n", .{});
+                result.kind = .string_literal;
+                continue :state .string_literal;
+            },
             'a'...'z', 'A'...'Z', '_' => {
                 result.kind = .identifier;
                 continue :state .identifier;
@@ -270,7 +278,9 @@ pub fn next(self: *Tokenizer) ?Token {
         },
         .string_literal => {
             self.index += 1;
-            if (self.src[self.index] == '"' or self.src[self.index] == 0) {} else {
+            if (self.src[self.index] == '"' or self.src[self.index] == 0) {
+                self.index += 1;
+            } else {
                 continue :state .string_literal;
             }
         },

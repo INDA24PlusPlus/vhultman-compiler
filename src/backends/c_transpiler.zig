@@ -1,5 +1,6 @@
 const std = @import("std");
 const Ast = @import("../Ast.zig");
+const Sema = @import("../Sema.zig");
 
 pub fn CTranspiler(comptime WriterType: type) type {
     return struct {
@@ -39,6 +40,7 @@ pub fn CTranspiler(comptime WriterType: type) type {
         fn writePreamble(self: *Self) !void {
             try self.writer.print("#include <stdint.h>\n", .{});
             try self.writer.print("#include <stdbool.h>\n", .{});
+            try self.writer.print("#include <stdio.h>\n", .{});
         }
 
         fn writeFunctionDefinitions(self: *Self) !void {
@@ -108,8 +110,34 @@ pub fn CTranspiler(comptime WriterType: type) type {
                 .block => try self.writeBlock(node),
                 .if_statement => try self.writeIf(node),
                 .while_loop => try self.writeWhile(node),
+                .print_statement => try self.writePrint(node),
                 else => std.debug.panic("Code gen not supported for {}", .{node.kind}),
             }
+        }
+
+        fn writePrint(self: *Self, node: *const Ast.Node) !void {
+            const identifier = self.ast.nodes.get(node.lhs);
+            const print_type: Sema.TypeHandle = @enumFromInt(identifier.lhs);
+            const format_specifier = switch (print_type) {
+                .u8 => "hhu",
+                .u16 => "hu",
+                .u32 => "u",
+                .u64 => "llu",
+                .i8 => "hhd",
+                .i16 => "hd",
+                .i32 => "d",
+                .i64 => "lld",
+                .f32 => "f",
+                .f64 => "lf",
+                .bool => "d",
+                .int_literal => unreachable,
+                .void => unreachable,
+                .undefined => unreachable,
+                _ => unreachable,
+            };
+            try self.writer.print("printf(\"%{s}\\n\", ", .{format_specifier});
+            try self.writeIdentifier(&identifier);
+            try self.writer.print(");\n", .{});
         }
 
         fn writeWhile(self: *Self, node: *const Ast.Node) anyerror!void {

@@ -37,6 +37,12 @@ pub const Node = struct {
         // extra[3] = maybe_else_body,
         if_statement,
 
+        // lhs -> child_count, rhs -> extra_index,
+        // extra[0] = num args.
+        // extra[1] = format string.
+        // extra[2..] = expressions (format args)
+        print_statement,
+
         var_decl, // lhs -> type_specifier, rhs -> expression
         const_decl, // lhs -> type_specifier, rhs -> expression
         type_specifier, // lhs -> identifier, rhs -> type_identifier
@@ -61,6 +67,7 @@ pub const Node = struct {
         identifier,
         int_literal,
         bool_literal,
+        string_literal,
         type_identifier,
     };
 
@@ -137,7 +144,7 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
             try self.print(writer, node.lhs, depth + 1);
             try self.print(writer, node.rhs, depth + 1);
         },
-        .return_statement => {
+        .return_statement, .print_statement => {
             try writer.print("{s}\n", .{@tagName(node.kind)});
             try self.print(writer, node.lhs, depth + 1);
         },
@@ -145,6 +152,7 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
         .type_identifier,
         .int_literal,
         .bool_literal,
+        .string_literal,
         => {
             const token = self.tokens.get(node.token);
             try writer.print("{s}: {s}\n", .{ @tagName(node.kind), self.src[token.start..token.end] });

@@ -63,14 +63,12 @@ fn resolveFunction(self: *Sema, node: *const Ast.Node) !void {
     const fn_ident_node = self.ast.extra.items[node.rhs];
     const fn_identifier = self.srcBytes(fn_ident_node);
 
-    log.debug("Putting the args in the symbol table for function: {s}\n", .{fn_identifier});
     const fn_header = self.type_reg.functions.get(fn_identifier).?;
     const arg_nodes = self.ast.extra.items[node.rhs + 1 .. node.rhs + node.lhs - 2];
 
     for (arg_nodes, fn_header.args) |node_index, arg_type| {
         const arg_node = self.ast.nodes.get(node_index);
         const bytes = self.srcBytes(arg_node.lhs);
-        log.debug("putting in {s} with type {}", .{ bytes, arg_type });
         try self.sym_table.put(self.gpa, .{ .type = arg_type, .token = arg_node.lhs, .is_const = true }, bytes);
     }
 
@@ -118,12 +116,22 @@ fn resolveStatement(self: *Sema, node: *const Ast.Node, return_type: TypeHandle)
             try self.resolveWhile(node, return_type);
             return false;
         },
+        .print_statement => {
+            try self.resolvePrint(node);
+            return false;
+        },
         .return_statement => {
             try self.resolveReturn(node, return_type);
             return true;
         },
         else => std.debug.panic("Semantic analysis not supported for {}", .{node.kind}),
     }
+}
+
+fn resolvePrint(self: *Sema, node: *const Ast.Node) !void {
+    const identifier = self.ast.nodes.get(node.lhs);
+    const identifier_type = try self.typeCheckExpression(&identifier);
+    self.ast.nodes.items(.lhs)[node.lhs] = @intFromEnum(identifier_type);
 }
 
 fn resolveWhile(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) anyerror!void {
@@ -200,10 +208,6 @@ fn resolveAssignment(self: *Sema, node: *const Ast.Node) !void {
 fn resolveReturn(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) !void {
     const expr = self.ast.nodes.get(node.lhs);
     const expr_type = try self.typeCheckExpression(&expr);
-
-    log.debug("return type is {}", .{return_type});
-    log.debug("expr type that is returned is {}", .{expr_type});
-
     if (!expr_type.coercesTo(return_type)) {
         try self.errors.append(self.gpa, .{
             .kind = .wrong_return_type,
@@ -222,14 +226,45 @@ fn resolveVarDecl(self: *Sema, node: *const Ast.Node) !void {
     const ident_token = self.ast.nodes.items(.token)[type_specifier.lhs];
     const bytes = self.srcBytes(type_specifier.lhs);
 
-    // TODO: this does not work for user specified types.
     const specified_type = TypeHandle.primtives_map.get(self.srcBytes(type_specifier.rhs)) orelse @panic("User specified types not supported yet");
     const expr_type = try self.typeCheckExpression(&expr);
 
-    log.debug("specified type for {s} is {}", .{ bytes, specified_type });
-    log.debug("expr type for {s} is {}", .{ bytes, expr_type });
+    // TODO: fix floats
+    if (expr_type == .int_literal and specified_type != .f32 and specified_type != .f64) {
+        const value = std.fmt.parseUnsigned(u64, expr.srcBytes(self.ast), 10) catch |err| switch (err) {
+            error.Overflow => blk: {
+                try self.errors.append(self.gpa, .{
+                    .kind = .int_too_big,
+                    .token = self.ast.tokens.get(expr.token),
+                    .type1 = specified_type,
+                });
 
-    log.info("TODO: Implement size checking for the int_literal type", .{});
+                break :blk 0;
+            },
+            else => unreachable,
+        };
+
+        const shift: u7 = switch (specified_type) {
+            .u8 => 8,
+            .u16 => 16,
+            .u32 => 32,
+            .u64 => 64,
+            .i8 => 7,
+            .i16 => 15,
+            .i32 => 31,
+            .i64 => 63,
+            else => unreachable,
+        };
+
+        if (value >= (@as(u128, 1) << shift)) {
+            try self.errors.append(self.gpa, .{
+                .kind = .int_too_big,
+                .token = self.ast.tokens.get(expr.token),
+                .type1 = specified_type,
+            });
+        }
+    }
+
     if (!expr_type.coercesTo(specified_type)) {
         try self.errors.append(self.gpa, .{
             .kind = .mismatched_specifier_type,
@@ -252,8 +287,6 @@ fn resolveVarDecl(self: *Sema, node: *const Ast.Node) !void {
             .is_const = is_const,
         }, bytes);
     }
-
-    std.debug.print("is const? {}: {s}\n", .{ is_const, bytes });
 }
 
 fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
@@ -277,28 +310,20 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                     .type2 = rhs_type,
                 });
 
-                // will coerce to any int type so we use this as substitute incase of error.
-                break :blk .int_literal;
+                break :blk .undefined;
             };
             if (!largest_type.isNumeric()) {
                 try self.errors.append(self.gpa, .{
                     .kind = .expected_numeric_type,
                     .token = self.ast.tokens.get(lhs_node.token),
                     .other_tok = self.ast.tokens.get(lhs_node.token),
-                    .type1 = lhs_type,
-                    .type2 = rhs_type,
+                    .type2 = lhs_type,
                 });
             }
 
             return largest_type;
         },
-        .int_literal => {
-            _ = std.fmt.parseUnsigned(u64, self.srcBytesNode(node), 10) catch |err| switch (err) {
-                error.Overflow => std.debug.panic("Integer too large!", .{}),
-                else => unreachable,
-            };
-            return .int_literal;
-        },
+        .int_literal => return .int_literal,
         .bool_literal => return .bool,
         .identifier => {
             const ident_token = self.ast.tokens.get(node.token);
@@ -318,7 +343,6 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
             const fn_name = self.ast.extra.items[node.rhs];
             const name_bytes = self.srcBytes(fn_name);
 
-            log.debug("type checking for fn call to {s}", .{name_bytes});
             const info = self.type_reg.functions.get(name_bytes) orelse {
                 try self.errors.append(self.gpa, .{
                     .kind = .use_of_undecl_fn,
@@ -377,7 +401,6 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                     .kind = .expected_numeric_type,
                     .token = self.ast.tokens.get(lhs_node.token),
                     .other_tok = self.ast.tokens.get(lhs_node.token),
-                    .type1 = lhs_type,
                     .type2 = rhs_type,
                 });
             }
@@ -407,7 +430,6 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                     .kind = .expected_numeric_type,
                     .token = self.ast.tokens.get(lhs_node.token),
                     .other_tok = self.ast.tokens.get(lhs_node.token),
-                    .type1 = lhs_type,
                     .type2 = rhs_type,
                 });
             }
@@ -443,13 +465,11 @@ fn globalScopePass(self: *Sema) !void {
             const return_type_node = self.ast.extra.items[node.rhs + node.lhs - 2];
             const return_type_bytes = self.srcBytes(return_type_node);
 
-            log.debug("Function has return type: {s}", .{return_type_bytes});
             const return_type = TypeHandle.primtives_map.get(return_type_bytes) orelse @panic("User specified types not supported yet");
 
             for (arg_types, arg_nodes) |*arg, arg_node_index| {
                 const type_specifier_node = self.ast.nodes.items(.rhs)[arg_node_index];
                 const arg_bytes = self.srcBytes(type_specifier_node);
-                log.debug("Arg type: {s}", .{arg_bytes});
                 arg.* = TypeHandle.primtives_map.get(arg_bytes) orelse @panic("User specified types not supported yet");
             }
 
@@ -482,8 +502,7 @@ fn globalScopePass(self: *Sema) !void {
     }
 }
 
-const TypeHandle = enum(u32) {
-    TODO,
+pub const TypeHandle = enum(u32) {
     undefined, // currently ONLY for expressions that fail type checking
     void,
     int_literal,
@@ -535,7 +554,6 @@ const TypeHandle = enum(u32) {
 
     pub fn coercesTo(self: TypeHandle, other: TypeHandle) bool {
         return switch (self) {
-            .TODO => @panic("trying to coerece todo"),
             .undefined => true,
             .int_literal => other.isNumeric(),
             .bool => other == .bool,
@@ -684,6 +702,7 @@ pub const SemaError = struct {
         reassign_of_const,
         mismatched_assign_type,
         expected_type,
+        int_too_big,
     };
 
     pub fn print(self: SemaError, writer: anytype, src: []const u8, file_name: []const u8) !void {
@@ -726,7 +745,7 @@ pub const SemaError = struct {
                 try writer.print("Mismatched type for function argument. Expected type {s} but got type {s}\n", .{ @tagName(self.type1), @tagName(self.type2) });
             },
             .expected_numeric_type => {
-                try writer.print("Type must be numeric for operation but instead got type {s} and {s}.\n", .{ @tagName(self.type1), @tagName(self.type2) });
+                try writer.print("Type must be numeric for operation but instead got type {s}.\n", .{@tagName(self.type2)});
             },
             .wrong_return_type => {
                 try writer.print("Wrong return type for function. Expected type {s} but got {s}.\n", .{ @tagName(self.type1), @tagName(self.type2) });
@@ -743,14 +762,17 @@ pub const SemaError = struct {
             .missing_return => {
                 try writer.print("Function \"{s}\" with return type {s} has code paths that don't return\n", .{ src[self.other_tok.?.start..self.other_tok.?.end], @tagName(self.type1) });
             },
-            .wrong_arg_count => {
-                try writer.print("Expected {d} arguments to function call but found {d}\n", .{ @intFromEnum(self.type1), @intFromEnum(self.type2) });
-            },
             .reassign_of_const => {
                 try writer.print("Cannot reassign a constant\n", .{});
             },
+            .wrong_arg_count => {
+                try writer.print("Expected {d} arguments to function call but found {d}\n", .{ @intFromEnum(self.type1), @intFromEnum(self.type2) });
+            },
             .expected_type => {
                 try writer.print("Expected type {s} but found type {s}\n", .{ @tagName(self.type1), @tagName(self.type2) });
+            },
+            .int_too_big => {
+                try writer.print("Integer literal too big for destination type {s}\n", .{@tagName(self.type1)});
             },
         }
 
