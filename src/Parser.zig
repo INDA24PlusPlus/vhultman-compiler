@@ -281,6 +281,7 @@ fn parseStatement(self: *Parser) !u32 {
         .@"const" => self.parseConstDecl(),
         .@"return" => self.parseReturn(),
         .@"if" => self.parseIf(),
+        .@"while" => self.parseWhile(),
         .@"{" => self.parseBlock(),
         .identifier => self.parseAssignment(),
         else => {
@@ -291,6 +292,25 @@ fn parseStatement(self: *Parser) !u32 {
             return error.ParseError;
         },
     };
+}
+
+fn parseWhile(self: *Parser) !u32 {
+    try self.expectNext(.@"while");
+    const node_index = try self.nodes.addOne(self.gpa);
+    const token = self.currentTokenIndex();
+    try self.expectNext(.@"(");
+    const cond = try self.parseExpression(.none);
+    try self.expectNext(.@")");
+    const body = try self.parseStatement();
+
+    self.nodes.set(node_index, .{
+        .kind = .while_loop,
+        .lhs = cond,
+        .rhs = body,
+        .token = token,
+    });
+
+    return @intCast(node_index);
 }
 
 fn parseIf(self: *Parser) !u32 {

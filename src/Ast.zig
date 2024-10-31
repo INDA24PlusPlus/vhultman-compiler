@@ -41,6 +41,7 @@ pub const Node = struct {
         const_decl, // lhs -> type_specifier, rhs -> expression
         type_specifier, // lhs -> identifier, rhs -> type_identifier
         assignment, // lhs -> identifier, rhs -> expression
+        while_loop, // lhs -> cond, rhs -> body
 
         // binary ops
         add,
@@ -130,6 +131,7 @@ pub fn print(self: *const Ast, writer: anytype, node_idx: u32, depth: u32) !void
         .assignment,
         .less_than_equal,
         .greater_than_equal,
+        .while_loop,
         => {
             try writer.print("{s}\n", .{@tagName(node.kind)});
             try self.print(writer, node.lhs, depth + 1);

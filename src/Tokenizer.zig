@@ -15,6 +15,7 @@ pub const Token = struct {
         .{ "false", .bool_literal },
         .{ "if", .@"if" },
         .{ "else", .@"else" },
+        .{ "while", .@"while" },
 
         .{ "u8", .primitive_type },
         .{ "u16", .primitive_type },
@@ -59,6 +60,7 @@ pub const Token = struct {
         @"fn",
         @"if",
         @"else",
+        @"while",
 
         bool_literal,
         int_literal,

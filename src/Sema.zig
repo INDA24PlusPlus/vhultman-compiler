@@ -114,12 +114,32 @@ fn resolveStatement(self: *Sema, node: *const Ast.Node, return_type: TypeHandle)
             // TODO: fix this return resolution shit. Ideally I don't want to do a CFG, but it is lookg more likely I have to.
             return try self.resolveIf(node, return_type);
         },
+        .while_loop => {
+            try self.resolveWhile(node, return_type);
+            return false;
+        },
         .return_statement => {
             try self.resolveReturn(node, return_type);
             return true;
         },
         else => std.debug.panic("Semantic analysis not supported for {}", .{node.kind}),
     }
+}
+
+fn resolveWhile(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) anyerror!void {
+    const cond = self.ast.nodes.get(node.lhs);
+    const body = self.ast.nodes.get(node.rhs);
+
+    const cond_type = try self.typeCheckExpression(&cond);
+    if (!cond_type.coercesTo(.bool)) {
+        try self.errors.append(self.gpa, .{
+            .kind = .expected_type,
+            .token = self.ast.tokens.get(node.token),
+            .type1 = .bool,
+            .type2 = cond_type,
+        });
+    }
+    _ = try self.resolveStatement(&body, return_type);
 }
 
 fn resolveIf(self: *Sema, node: *const Ast.Node, return_type: TypeHandle) anyerror!bool {
@@ -257,20 +277,9 @@ fn typeCheckExpression(self: *Sema, node: *const Ast.Node) !TypeHandle {
                     .type2 = rhs_type,
                 });
 
-                // will coerce to any int type so we use this as substuite incase of error.
+                // will coerce to any int type so we use this as substitute incase of error.
                 break :blk .int_literal;
             };
-
-            //if (lhs_type != rhs_type and lhs_type != .undefined and rhs_type != .undefined) {
-            //    try self.errors.append(self.gpa, .{
-            //        .kind = .invalid_types_for_op,
-            //        .token = self.ast.tokens.get(lhs_node.token),
-            //        .other_tok = self.ast.tokens.get(lhs_node.token),
-            //        .type1 = lhs_type,
-            //        .type2 = rhs_type,
-            //    });
-            //}
-
             if (!largest_type.isNumeric()) {
                 try self.errors.append(self.gpa, .{
                     .kind = .expected_numeric_type,

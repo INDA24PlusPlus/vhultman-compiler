@@ -107,8 +107,18 @@ pub fn CTranspiler(comptime WriterType: type) type {
                 .assignment => try self.writeAssignment(node),
                 .block => try self.writeBlock(node),
                 .if_statement => try self.writeIf(node),
+                .while_loop => try self.writeWhile(node),
                 else => std.debug.panic("Code gen not supported for {}", .{node.kind}),
             }
+        }
+
+        fn writeWhile(self: *Self, node: *const Ast.Node) anyerror!void {
+            try self.writer.print("while (", .{});
+            const cond = self.ast.nodes.get(node.lhs);
+            try self.writeExpression(&cond, .none);
+            try self.writer.print(")", .{});
+            const body = self.ast.nodes.get(node.rhs);
+            try self.writeStatement(&body);
         }
 
         fn writeIf(self: *Self, node: *const Ast.Node) anyerror!void {

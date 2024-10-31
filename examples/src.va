@@ -2,6 +2,10 @@ fn main() void {
 	var b: u64 = foo(10);
 	var what: u32 = 10;
 	var c: u64 = b + what;
+
+	while (c < 100) {
+		c = c + 1;
+	}
 }
 // does this work?
 fn foo(n: u64) u64 {
