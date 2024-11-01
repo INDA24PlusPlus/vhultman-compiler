@@ -96,7 +96,8 @@ pub fn CTranspiler(comptime WriterType: type) type {
             try self.writer.print(" {{\n", .{});
             const statements = self.ast.extra.items[node.rhs .. node.rhs + node.lhs];
             for (statements) |statement| {
-                try self.writeStatement(&self.ast.nodes.get(statement));
+                const statement_node = self.ast.nodes.get(statement);
+                try self.writeStatement(&statement_node);
                 try self.writer.print("\n", .{});
             }
             try self.writer.print("}}\n", .{});
@@ -175,7 +176,7 @@ pub fn CTranspiler(comptime WriterType: type) type {
 
         fn writeReturn(self: *Self, node: *const Ast.Node) !void {
             try self.writer.print("return ", .{});
-            try self.writeExpression(&self.ast.nodes.get(node.rhs), .none);
+            try self.writeExpression(&self.ast.nodes.get(node.lhs), .none);
             try self.writer.print(";", .{});
         }
 

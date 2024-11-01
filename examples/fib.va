@@ -1,0 +1,28 @@
+fn main() void {
+	const recursive_result: u64 = fibRecursive(25);
+	const non_recursive_result: u64 = fib(25);
+	print(recursive_result);
+	print(non_recursive_result);
+}
+
+fn fib(n: u64) u64 {
+	var a: u64 = 0;
+	var b: u64 = 1;
+	var i: u64 = 2;
+	while (i <= n) {
+		var temp: u64 = a + b;
+		a = b;
+		b = temp;
+		i = i + 1;
+	}
+
+	return b;
+}
+
+fn fibRecursive(n: u64) u64 {
+	if (n <= 1) {
+		return n;
+	}
+
+	return fib(n - 1) + fib(n - 2);
+}
